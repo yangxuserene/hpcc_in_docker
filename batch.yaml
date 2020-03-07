@@ -1,0 +1,205 @@
+
+Description:  This template deploys a VPC, with a pair of public and private subnets for
+  a certain AvailabilityZone. It deploys an internet gateway, with a default route on the
+  public subnets. It deploys a NAT gateway, and default routes for them in the private subnets.
+Parameters:        
+  BatchAZ:
+    Description: Please enter the Availability Zone where subnet is created
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: us-west-2a
+  BatchVpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.192.0.0/16
+  BatchPublicSubnetCIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+    Default: 10.192.10.0/24
+  BatchPrivateSubnetCIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.192.20.0/24
+Resources:
+  BatchECSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:      
+      Path: /
+      Roles: [!Ref 'BatchECSInstanceRole']
+  BatchECSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+      Description: Allow EC2 instances in an ECS cluster to access ECS
+      Path: /
+  BatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service: batch.amazonaws.com    
+      Description: Allows Batch to create and manage AWS resources on your behalf.      
+      Path: /
+  BatchJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com    
+      Description: Give Batch Job S3 full access
+      Path: /
+  BatchVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref BatchVpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-BatchVPC
+  BatchInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-BatchInternetGateway
+  BatchInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref BatchInternetGateway
+      VpcId: !Ref BatchVPC
+  BatchPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BatchVPC
+      AvailabilityZone: !Ref BatchAZ
+      CidrBlock: !Ref BatchPublicSubnetCIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-BatchPublicSubnet
+  BatchPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BatchVPC
+      AvailabilityZone: !Ref BatchAZ
+      CidrBlock: !Ref BatchPrivateSubnetCIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-BatchPrivateSubnet
+  BatchNatGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: BatchInternetGatewayAttachment
+    Properties:
+      Domain: vpc
+  BatchNatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt BatchNatGatewayEIP.AllocationId
+      SubnetId: !Ref BatchPublicSubnet
+  BatchPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BatchVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-BatchPublicRouteTable
+  BatchDefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: BatchInternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref BatchPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref BatchInternetGateway
+  BatchPublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref BatchPublicRouteTable
+      SubnetId: !Ref BatchPublicSubnet
+  BatchPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BatchVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-BatchPrivateRouteTable
+  BatchDefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref BatchPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref BatchNatGateway
+  BatchPrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref BatchPrivateRouteTable
+      SubnetId: !Ref BatchPrivateSubnet
+  BatchSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${AWS::StackName}-BatchSecurityGroup
+      GroupDescription: "Security group for efa instances"
+      VpcId: !Ref BatchVPC
+  BatchSecurityGroupOutboundAllRule:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      IpProtocol: -1
+      FromPort: 0
+      ToPort: 65535
+      CidrIp: 0.0.0.0/0
+      GroupId: !GetAtt BatchSecurityGroup.GroupId
+  BatchSecurityGroupOutboundSelfRule:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      IpProtocol: -1
+      DestinationSecurityGroupId: !GetAtt BatchSecurityGroup.GroupId
+      GroupId: !GetAtt BatchSecurityGroup.GroupId
+  BatchSecurityGroupInboundSelfRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: -1
+      SourceSecurityGroupId: !GetAtt BatchSecurityGroup.GroupId
+      GroupId: !GetAtt BatchSecurityGroup.GroupId
+Outputs:
+  BatchVPC:
+    Description: A reference to the created VPC
+    Value: !Ref BatchVPC
+  BatchPublicSubnet:
+    Description: A reference to the public subnet in the BatchAZ
+    Value: !Ref BatchPublicSubnet
+  BatchPrivateSubnet:
+    Description: A reference to the private subnet in the BatchAZ
+    Value: !Ref BatchPrivateSubnet
+  BatchSecurityGroup:
+    Description: Security group for batch efa-enabled instances
+    Value: !Ref BatchSecurityGroup
+  BatchECSInstanceProfile:
+    Description: Batch ECS instance profile Arn
+    Value: !GetAtt BatchECSInstanceProfile.Arn
+  BatchServiceRole:
+    Description: Batch Service Role Arn
+    Value: !GetAtt BatchServiceRole.Arn
+  BatchJobRole:
+    Description: Batch Service Role Arn
+    Value: !GetAtt BatchJobRole.Arn
