@@ -73,23 +73,6 @@ RUN if [ "$MPI_TYPE" = "intelmpi" ]; then \
 	tar -xf l_mpi_2019.6.166.tgz; cd l_mpi_2019.6.166; \
         ./install.sh -s silent.cfg --accept_eula; fi
 
-## Install Intel MKL
-RUN yum-config-manager --add-repo https://yum.repos.intel.com/setup/intelproducts.repo; \
-    yum -y install intel-mkl-2020.0-088
-
-## Update gcc to 9.2.0, since hpcc build need the -mavx512f, -mavx512cd, -mavx512er flags,
-## these default gcc version 4.8 doesn't support those flags
-RUN wget http://gnu.mirror.constant.com/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz; \
-    echo "update gcc to ${GCC_VERSION}"; \
-    tar -vzxf gcc-${GCC_VERSION}.tar.gz; \
-    mkdir gcc-build; \
-    cd gcc-build; \
-    ../gcc-${GCC_VERSION}/configure --enable-languages=c,c++ --disable-multilib; \
-    make -j 2; \
-    make install; \
-    export PATH=/usr/local/bin:$PATH; \
-    export LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
-
 ###################################################
 ## Download Libfabric
 RUN git clone https://github.com/ofiwg/libfabric
@@ -142,7 +125,7 @@ RUN curl -O https://s3.us-west-2.amazonaws.com/subspace-benchmarks-files/spack_m
 	&& make \
 	&& make install
 
-## Install hpcg
+# Install hpcg
 RUN git clone -b HPCG-release-3-0-branch https://github.com/hpcg-benchmark/hpcg.git \
 	&& export PATH=${MPI_INSTALL_PATH}/bin:$PATH \
 	&& mkdir hpcg/build \
@@ -151,10 +134,34 @@ RUN git clone -b HPCG-release-3-0-branch https://github.com/hpcg-benchmark/hpcg.
 	&& make \
 	&& popd
 
+
+
+###########################################################
+# Following commands are for hpcc installation and compile.
+# hpcc requires Intel MKL and newer version of GCC.
+#########################################################
+## Install Intel MKL
+RUN yum-config-manager --add-repo https://yum.repos.intel.com/setup/intelproducts.repo; \
+    yum -y install intel-mkl-2020.0-088
+
+## Update gcc to 9.2.0, since hpcc build need the -mavx512f, -mavx512cd, -mavx512er flags,
+## the default gcc version 4.8 doesn't support those flags.
+## This is very time consuming in Docker. 
+RUN wget http://gnu.mirror.constant.com/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz; \
+    echo "update gcc to ${GCC_VERSION}"; \
+    tar -vzxf gcc-${GCC_VERSION}.tar.gz; \
+    mkdir gcc-build; \
+    cd gcc-build; \
+    ../gcc-${GCC_VERSION}/configure --enable-languages=c,c++ --disable-multilib; \
+    make -j 2; \
+    make install; \
+    export PATH=/usr/local/bin:$PATH; \
+    export LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
+
+## install and compile hpcc
 RUN git clone https://github.com/yangxuserene/hpcc.git \
     && cd hpcc/hpcc-1.5.0 \
     && make arch=xyangamz-docker
-
 
 ## supervisor container startup
 
