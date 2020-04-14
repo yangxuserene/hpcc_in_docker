@@ -4,9 +4,15 @@
 FROM amazonlinux:1    
 ENV USER efauser 
 RUN yum update -y 
-RUN yum install -y which gcc-c++ libtool autoconf automake util-linux make tar.x86_64 iproute2 gcc-gfortran openssh-server openssh-client python36 python36-pip build-essential wget curl git wget pkg-config zip unzip libnl3-devel emacs diffutils aws-cli
-RUN yum install -y vim bzip2 gcc gmp-devel libmpc-devel mpfr-devel
+RUN yum install -y which gcc-c++ libtool autoconf automake util-linux make tar.x86_64 \
+    iproute2 gcc-gfortran openssh-server openssh-client python36 python36-pip \
+    build-essential wget curl git wget pkg-config zip unzip libnl3-devel emacs \
+    diffutils aws-cli && yum -y clean all
 RUN pip-3.6 install supervisor
+
+## The installation below is required for updating gcc to version 9.2
+RUN yum install -y vim bzip2 gcc gmp-devel libmpc-devel mpfr-devel && yum -y clean all
+
 
 RUN useradd -ms /bin/bash $USER
 ENV HOME /home/$USER
@@ -142,11 +148,12 @@ RUN git clone -b HPCG-release-3-0-branch https://github.com/hpcg-benchmark/hpcg.
 #########################################################
 ## Install Intel MKL
 RUN yum-config-manager --add-repo https://yum.repos.intel.com/setup/intelproducts.repo; \
-    yum -y install intel-mkl-2020.0-088
+    yum -y install intel-mkl-2020.0-088; \
+    yum -y clean all
 
 ## Update gcc to 9.2.0, since hpcc build need the -mavx512f, -mavx512cd, -mavx512er flags,
 ## the default gcc version 4.8 doesn't support those flags.
-## This is very time consuming in Docker. 
+## This is very time consuming in Docker.
 RUN wget http://gnu.mirror.constant.com/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz; \
     echo "update gcc to ${GCC_VERSION}"; \
     tar -vzxf gcc-${GCC_VERSION}.tar.gz; \
@@ -156,11 +163,15 @@ RUN wget http://gnu.mirror.constant.com/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION
     make -j 2; \
     make install; \
     export PATH=/usr/local/bin:$PATH; \
-    export LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH; \
+    cd ../ \
+    rm -r gcc-build; \
+    rm gcc-${GCC_VERSION}.tar.gz
 
 ## install and compile hpcc
-RUN git clone https://github.com/yangxuserene/hpcc.git \
-    && cd hpcc/hpcc-1.5.0 \
+RUN git clone https://github.com/yangxuserene/hpcc.git
+RUN cd hpcc/hpcc-1.5.0 \
+    && export PATH=${MPI_INSTALL_PATH}/bin:$PATH \
     && make arch=xyangamz-docker
 
 ## supervisor container startup
